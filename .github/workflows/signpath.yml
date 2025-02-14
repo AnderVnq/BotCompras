@@ -3,14 +3,14 @@ name: Sign Executable with SignPath
 on:
   push:
     branches:
-      - master  # Se ejecutará cada vez que hagas un push a la rama master
+      - master  # Se ejecutará en cada push a la rama master
 
 jobs:
   sign-exe:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4  # ✅ Última versión estable
 
       - name: Upload file to SignPath manually
         run: |
@@ -28,12 +28,12 @@ jobs:
       - name: Wait for Signing Job
         run: sleep 60  # Espera 60 segundos para que SignPath firme el archivo
 
-      - name: Download signed file
+      - name: Download signed file and overwrite original
         run: |
-          curl -o BotCompras_signed.exe -L "https://signpath.io/api/v1/organizations/1436e576-b307-4a78-93dd-e3034647d07b/applications/BotCompras/signing-jobs/latest/signed-artifacts"
+          curl -o Output/BotCompras.exe -L "https://signpath.io/api/v1/organizations/1436e576-b307-4a78-93dd-e3034647d07b/applications/BotCompras/signing-jobs/latest/signed-artifacts"
 
       - name: Upload signed file to GitHub Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # ✅ Última versión estable
         with:
           name: Signed-BotCompras
-          path: BotCompras.exe
+          path: Output/BotCompras.exe
