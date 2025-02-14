@@ -1,0 +1,33 @@
+# Ignore virtual environments
+venv/
+env/
+
+# Ignore Python compiled files
+*.pyc
+*.pyo
+__pycache__/
+
+# Ignore IDE/editor specific files
+.vscode/
+.idea/
+.env
+script.iss
+# Ignore log files
+*.log
+
+# Ignore deployment directories
+deploy/
+dist/
+build/
+
+# Ignore Selenium WebDriver binaries
+chromedriver
+geckodriver
+
+# Ignore Tkinter specific files (if any)
+*.tcl
+*.tk
+
+# Ignore other common files
+.DS_Store
+Thumbs.db
