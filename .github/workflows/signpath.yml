@@ -1,0 +1,26 @@
+name: Sign Executable with SignPath
+
+on:
+  push:
+    branches:
+      - master  # Se ejecutará cada vez que hagas un push a la rama master
+
+jobs:
+  sign-exe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Upload file to SignPath
+        uses: signpath/signpath-github-action@v1
+        with:
+          application: "BotCompras"  # 🔹 Reemplázalo con el nombre correcto de tu aplicación en SignPath
+          signingPolicy: "Standard Code Signing"
+          organization: "1436e576-b307-4a78-93dd-e3034647d07b"  # ID de tu organización en SignPath (CompraFacil)
+          artifactPath: "Output/BotCompras.exe"  # Ruta de tu ejecutable en el repositorio
+          signPathApiToken: ${{ secrets.SIGNPATH_API_TOKEN }}
+
+      - name: Download signed file
+        run: |
+          curl -o BotCompras_signed.exe -L "https://signpath.io/api/download/BotCompras_signed.exe"
