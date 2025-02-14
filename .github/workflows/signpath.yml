@@ -28,6 +28,4 @@ jobs:
       - name: Wait for Signing Job
         run: sleep 60  # Espera 60 segundos para que SignPath firme el archivo
 
-      - name: Download signed file
-        run: |
-          curl -o BotCompras_signed.exe -L "https://signpath.io/api/v1/organizations/1436e576-b307-4a78-93dd-e3034647d07b/applications/BotCompras/signing-jobs/latest/signed-artifacts"
+      - name: Download
