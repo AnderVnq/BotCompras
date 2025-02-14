@@ -3,7 +3,7 @@ name: Sign Executable with SignPath
 on:
   push:
     branches:
-      - master  # Se ejecutará cada vez que hagas un push a la rama master
+      - master  # Se ejecutará en cada push a la rama master
 
 jobs:
   sign-exe:
@@ -12,15 +12,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Upload file to SignPath
-        uses: signpath/signpath-github-action@v1
-        with:
-          application: "BotCompras"  # 🔹 Reemplázalo con el nombre correcto de tu aplicación en SignPath
-          signingPolicy: "Standard Code Signing"
-          organization: "1436e576-b307-4a78-93dd-e3034647d07b"  # ID de tu organización en SignPath (CompraFacil)
-          artifactPath: "Output/BotCompras.exe"  # Ruta de tu ejecutable en el repositorio
-          signPathApiToken: ${{ secrets.SIGNPATH_API_TOKEN }}
+      - name: Upload file to SignPath manually
+        run: |
+          curl -X POST "https://signpath.io/api/v1/organizations/1436e576-b307-4a78-93dd-e3034647d07b/applications/BotCompras/signing-jobs" \
+          -H "Authorization: Bearer ${{ secrets.SIGNPATH_API_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "artifacts": [{
+              "filePath": "Output/BotCompras.exe"
+            }],
+            "signingPolicyName": "Standard Code Signing",
+            "signingRequestId": "github-actions"
+          }'
+
+      - name: Wait for Signing Job
+        run: sleep 60  # Espera 60 segundos para que SignPath firme el archivo
 
       - name: Download signed file
         run: |
-          curl -o BotCompras_signed.exe -L "https://signpath.io/api/download/BotCompras_signed.exe"
+          curl -o BotCompras_signed.exe -L "https://signpath.io/api/v1/organizations/1436e576-b307-4a78-93dd-e3034647d07b/applications/BotCompras/signing-jobs/latest/signed-artifacts"
