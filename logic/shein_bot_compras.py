@@ -13,7 +13,7 @@ from data.dat_bug_logs import BugLogogger
 from bs4 import BeautifulSoup
 import json
 import re
-
+from datetime import date
 
 class SheinBotCompras():
 
@@ -21,7 +21,7 @@ class SheinBotCompras():
         self.language = language
         self.headless=True
         self.gui_callback = gui_callback
-        self.driver = self.init_driver()
+        self.driver = None
         self.url_base = "https://www.shein.com/"
         self.url_base_usa="https://us.shein.com/"
         self.soup = None
@@ -44,9 +44,25 @@ class SheinBotCompras():
         self.is_login=False
         self.is_close_modalv2=False
         self.is_close_modal=False
+        self.is_close_banner=False
+        self.is_set_size=False
         self.html_bs4=None
+        self.is_login=False
+        
+
+
 
     def init_driver(self):
+
+        if self.driver is not None:
+            try:
+                if self.driver.window_handles:  # Comprueba si hay ventanas abiertas
+                    self.gui_callback("El WebDriver ya está en ejecución. Reutilizando...")
+                    return self.driver
+            except Exception as e:
+                self.gui_callback("El WebDriver se cerró inesperadamente. Reiniciando...")
+                self.driver = None 
+
         """ Inicializa el WebDriver con las opciones deseadas """
         headers = {
             'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -85,13 +101,20 @@ class SheinBotCompras():
         
         opts.add_argument("--ignore-certificate-errors")
         opts.add_argument(f'User-agent={headers["User-Agent"]}')
+        opts.add_experimental_option("prefs", {
+                "credentials_enable_service": False,
+                "profile.password_manager_enabled": False
+        })  
+
         # Intenta conectarte al servidor de Selenium
         # driver= webdriver.Remote(
         #     command_executor=selenium_url,
         #     options=opts
         # )
-        driver= webdriver.Chrome(options=opts)
-        return driver
+        self.driver= webdriver.Chrome(options=opts)
+        #self.driver = driver
+        return self.driver
+    
     
 
 
@@ -146,7 +169,7 @@ class SheinBotCompras():
             return
 
         # Crear lista de SKUs para enviar a la BD
-        sku_list = [{"sku": item["sku"]} for item in data]
+        sku_list = [{"SKU": item["SKU"]} for item in data]
         #print("sku_list", sku_list)
 
         # Obtener los datos de la BD
@@ -157,12 +180,12 @@ class SheinBotCompras():
         #print("response_db", response_db)
 
         # Crear un diccionario con SKU como clave y un diccionario con 'product_id' y 'size' como valor
-        sku_dict = {item["sku"]: {"product_id": item["product_id"], "size": item["size"]} for item in response_db}
+        sku_dict = {item["SKU"]: {"product_id": item["product_id"], "size": item["size"],"sku_code":item["sku_code"]} for item in response_db}
         #print("sku_dict", sku_dict)
 
         # Agregar 'product_id' y 'size' a cada elemento de data
         for item in data:
-            item.update(sku_dict.get(item["sku"], {"product_id": None, "size": None}))
+            item.update(sku_dict.get(item["SKU"], {"product_id": None, "size": None,"sku_code":None}))
 
         response = data
 
@@ -172,8 +195,11 @@ class SheinBotCompras():
            #print("No se encontraron datos para procesar")
             self.gui_callback("No se encontraron datos para procesar", error=True)
             return
-        login=self.ingresar_datos_cuenta()
-        if login:
+        
+        if self.is_login == False:
+            self.is_login=self.ingresar_datos_cuenta()
+            
+        if self.is_login:
             return self.process_skus_data()
         else:
             #print("Error al ingresar datos de la cuenta")
@@ -184,7 +210,7 @@ class SheinBotCompras():
 
     def set_sku_data_list(self, data):
         self.sku_data=None
-        self.sku_data = [{**item, "resultado": None} for item in data]
+        self.sku_data = [{**item, "Resultado": None} for item in data]
 
 
     def process_skus_data(self):
@@ -197,23 +223,26 @@ class SheinBotCompras():
         self.gui_callback(f"Procesando {self.lenght_sku_list} SKUs", error=False)
 
         for data_sdk in sku_list:
-            self.gui_callback(f"Procesando SKU {data_sdk['sku']} {data_sdk['product_id']}", error=False)
+            self.gui_callback(f"Procesando SKU {data_sdk['SKU']} {data_sdk['product_id']}", error=False)
 
         try:
-
             for index,data in enumerate(sku_list):
 
                 if data.get("product_id", None).strip(): #and bool(int(data.get("is_parent", False))):
                     url=self.url_base+f"product-p-{data['product_id']}.html?languaje=es"
                     self.url_complete=self.url_base_usa+f"product-p-{data['product_id']}.html"
                     self.driver.get(self.url_complete)
-                    self.gui_callback(f"-------- Procesando SKU {data['sku']} ---------- ", error=False)
+                    self.gui_callback(f"-------- Procesando SKU {data['SKU']} ---------- ", error=False)
+                    #self.driver.execute_script("document.body.style.zoom='80%'")
                     self.automatizacion(index)
                     self.url_complete=None
                     self.html_bs4=None
+                    if index == self.lenght_sku_list - 1:
+                        self.gui_callback("Accediendo a CHECKOUT PARA PRECIOS ", error=False)
+                        self.process_price_in_checkout()
                 else:
                     #print("no se encontro el product id")
-                    self.sku_data[index]["resultado"] = "no se encontro el product id en la BD"
+                    self.sku_data[index]["Resultado"] = "no se encontro el product id en la BD"
                     self.not_processed.append(data)
             return self.sku_data
             #self.sku_data=None
@@ -251,22 +280,84 @@ class SheinBotCompras():
         return True
 
 
+    def cambiar_tipo_talla(self):
+
+        if self.is_set_size:
+            return True
+        try:
+
+            
+            # Localiza el contenedor del selector de tipo de talla
+            tipo_talla = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//div[@class="common-local-size__country"]'))
+            )
+
+            # Obtiene el texto dentro del contenedor
+            tipo_talla_texto = tipo_talla.text.strip().lower()
+
+            # Si ya contiene "tipo" o "por defecto", no hace nada
+            if "tipo" in tipo_talla_texto or "por defecto" in tipo_talla_texto or "type" in tipo_talla_texto or "default" in tipo_talla_texto:
+                self.gui_callback("Tipo de talla ya está configurado correctamente.")
+                self.is_set_size=True
+                return True
+
+            container = self.driver.find_element(By.XPATH, '//div[@class="product-intro__size-choose"]')
+            self.driver.execute_script("""
+                var element = arguments[0];
+                var rect = element.getBoundingClientRect();
+                var absoluteElementTop = rect.top + window.pageYOffset;
+                var middle = absoluteElementTop - (window.innerHeight / 2) + (rect.height / 2);
+                window.scrollTo({ top: middle, behavior: 'smooth' });
+            """, container)
+            # Si no tiene el texto deseado, hace clic para abrir el dropdown
+            self.gui_callback("Abriendo selector de tipo de talla...")
+            WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable(tipo_talla)
+            ).click()
+
+            # Espera a que aparezca el dropdown con el ul
+            dropdown_opciones = WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.XPATH, '//ul[@class="common-local-size__country-box"]'))
+            )
+
+            # Localiza el primer li dentro del dropdown
+            primer_li = dropdown_opciones.find_element(By.XPATH, './li[1]')
+
+            # Obtiene el texto del primer li
+            primer_li_texto = primer_li.text.strip().lower()
+
+            # Si el primer li contiene "por defecto" o "tallas por defecto", hace clic en él
+            if "por defecto" in primer_li_texto or "tallas por defecto" in primer_li_texto:
+                self.gui_callback(f"Seleccionando opción: {primer_li_texto}")
+                WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable(primer_li)
+                ).click()
+            else:
+                self.gui_callback(f"Opción no encontrada: {primer_li_texto}", error=True)
+                return False
+
+            self.is_set_size=True
+            return True
+
+        except Exception as e:
+            self.gui_callback(f"Error en cambiar_tipo_talla: {e}", error=True)
+            return False
+        
 
     def automatizacion(self,index):
 
         current_sku=self.sku_data[index]
-        current_sku["precio"]="0.0"
+        current_sku["Precio Compra"]="0.0"
 
         #self.process_price_in_checkout()
 
 
-        if current_sku["sku"] == "" or current_sku["sku"] == None:
+        if current_sku["SKU"] == "" or current_sku["SKU"] == None:
             #print("SKU vacío")
             self.gui_callback("SKU vacío", error=True)
             self.not_processed.append(current_sku)
             return
-
-        self.driver.implicitly_wait(5)
+        
         try:
             WebDriverWait(self.driver, 10).until(
                 lambda d: "captcha" not in d.current_url
@@ -304,7 +395,7 @@ class SheinBotCompras():
                 else:
                     #print("❌ CAPTCHA no resuelto en 5 minutos. Pasando al siguiente SKU.")
                     self.gui_callback("CAPTCHA no resuelto en 5 minutos", error=True)
-                    current_sku["resultado"] = "CAPTCHA no resuelto"
+                    current_sku["Resultado"] = "CAPTCHA no resuelto"
                     self.not_processed.append(current_sku)
                     return
         except:
@@ -313,7 +404,7 @@ class SheinBotCompras():
 
         if self.validate_not_exists_page():
             #print("Producto no encontrado")
-            current_sku["resultado"] = "producto no encontrado"
+            current_sku["Resultado"] = "producto no encontrado"
             self.gui_callback(f"producto no encontrado", error=True)
             self.not_processed.append(current_sku)
             return
@@ -323,10 +414,13 @@ class SheinBotCompras():
         self.close_banner()
         self.close_popup()
 
+        
+
+        self.cambiar_tipo_talla()
 
         if self.validate_agotado():
             #print("Producto agotado")
-            current_sku["resultado"] = "agotado"
+            current_sku["Resultado"] = "agotado"
             self.gui_callback("producto agotado", error=True)
             self.not_processed.append(current_sku)
             return
@@ -338,20 +432,20 @@ class SheinBotCompras():
 
         if not self.validate_size(current_sku['size']):
             #print("Talla no disponible")
-            current_sku["resultado"] = "talla no disponible"
+            current_sku["Resultado"] = "talla no disponible"
             self.gui_callback("talla no disponible", error=True)
             self.not_processed.append(current_sku)
             return
         
         #print("Talla disponible")
         self.gui_callback("talla disponible", error=False)
-        cantidad=current_sku['cantidad']
+        cantidad=current_sku['Cantidad']
         if not self.añadir_carrito(cantidad):
             #print("Error al añadir al carrito self.añadir_carrito()")
-            current_sku["resultado"] = "error al añadir al carrito"
+            current_sku["Resultado"] = "error al añadir al carrito"
             self.gui_callback("error al añadir al carrito", error=True)
             self.not_processed.append(current_sku)
-            current_sku['resultado']="Error al añadir producto"
+            current_sku['Resultado']="Error al añadir producto"
             return
         
         #print("salio de añadir al carrito")
@@ -366,7 +460,7 @@ class SheinBotCompras():
             return
         # if not self.validar_producto_añadido():
         #     print("Producto no añadido al carrito validacion")
-        #     current_sku["resultado"] = "producto no añadido al carrito"
+        #     current_sku["Resultado"] = "producto no añadido al carrito"
         #     self.gui_callback("producto no añadido al carrito", error=True)
         #     self.not_processed.append(current_sku)
         #     return
@@ -376,41 +470,10 @@ class SheinBotCompras():
         #     return
         self.gui_callback("Producto listo para validar", error=False)
 
-
-        # if not self.set_quantity(current_sku['quantity']):
-        #     print("Error al establecer la cantidad")
-        #     self.not_processed.append(current_sku)
-        #     return
-        
-        
-        # print("Cantidad establecida correctamente")
-        
-        # if self.click_para_checkout_validar_data():
-        #     print("Checkout validado")
-        # else:
-        #     print("Error al validar el checkout")
-        #     self.not_processed.append(current_sku)
-        #     return
-        
-
-        # self.ingresar_datos_cuenta()
-
-        # if self.procesar_pago_and_checkout_price():
-        #     print("Pago procesado y precio de checkout validado")
-        # else:
-        #     print("Error al procesar el pago y el precio del checkout")
-        #     self.not_processed.append(current_sku)
-        #     return
-
-        current_sku["resultado"] = "añadido al carrito"
+        current_sku["Resultado"] = "añadido al carrito"
         self.updated_rows(1)
         self.driver.implicitly_wait(5)
         
-        if index == self.lenght_sku_list - 1:
-            self.gui_callback("Accediendo a CHECKOUT PARA PRECIOS ", error=False)
-            self.process_price_in_checkout()
-
-
 
     def get_price(self):
 
@@ -468,6 +531,7 @@ class SheinBotCompras():
             current_url=self.driver.current_url
             contador=1
             while "login" in current_url:
+                print("en login")
                 time.sleep(1)
                 self.gui_callback(f"Esperando carga de la cuenta ({contador})", error=False)
                 contador+=1
@@ -476,64 +540,7 @@ class SheinBotCompras():
             if "login" not in current_url:
                 self.is_login = True
                 return True
-            #cuenta_regresiva = 5
-            # for _ in range(5):
-            #     self.gui_callback(f"Ingresando datos de la cuenta en {cuenta_regresiva} segundos", error=False)
-            #     time.sleep(1)
-            #     cuenta_regresiva -= 1
-            # if "login" not in current_url:
-            #     self.is_login = True
-            #     return True
-        # current_url=self.driver.current_url
-        
-        # try:
-        #     WebDriverWait(self.driver, 10).until(
-        #         EC.presence_of_element_located((By.XPATH, '//div[@class="input_filed-wrapper"]'))
-        #     )
 
-
-        #     container_input=self.driver.find_element(By.XPATH,'//div[@class="email-recommend-input"]')
-        #     input_email=container_input.find_element(By.XPATH,'.//input[@class="sui-input__inner sui-input__inner-suffix"]')
-        #     input_email.send_keys(self.account_shein)
-
-        #     click_button_continue=self.driver.find_element(By.XPATH,'//div[@class="actions"]//div[@class="login-point_button"]/button')
-
-        #     click_button_continue.click()
-        #     time.sleep(1)
-        #     container_password=WebDriverWait(self.driver, 10).until(
-        #         EC.presence_of_element_located((By.XPATH, '//div[@class="input_filed-text"]'))
-        #     )
-        #     try:
-
-        #         click_button_continue.click()
-        #     except Exception as e:
-        #         #print(f"Error al clickear el por 2 vez el botón de continuar: {str(e)}")
-        #         return False
-
-        #     try:
-        #         input_password_1 = container_password.find_element(By.XPATH, './/div[@class="sui-input"]//input[@class="sui-input__inner sui-input__inner-suffix"]')
-        #         input_password_1.send_keys(self.password_shein)
-        #     except (ElementNotInteractableException, WebDriverException) as e:
-        #         try:
-        #             # Si no se puede interactuar con el primero, intentamos con el segundo
-        #             input_password_2 = container_password.find_elements(By.XPATH, './/div[@class="sui-input"]//input[@class="sui-input__inner sui-input__inner-suffix"]')[1]
-        #             input_password_2.send_keys(self.password_shein)
-        #         except (ElementNotInteractableException, WebDriverException) as e:
-        #             # Si ambos fallan, lanzamos un error
-        #             raise Exception("No se pudo enviar la contraseña a ninguno de los campos.")
-
-        #     click_button_continue_2=self.driver.find_element(By.XPATH,'//div[@class="actions"]//div[@class="login-point_button"]/button')[1]
-            
-
-        #     click_button_continue_2.click()
-        #     time.sleep(1)
-            
-        #     if current_url == self.driver.current_url:
-        #         print("Error al ingresar datos de la cuenta , no cambió de pagina")
-        #         return False
-
-        #self.guardar_cookies()
-        #self.guardar_session_storage()
 
         except Exception as e:
             print(f"Error al ingresar datos de la cuenta: {str(e)}")
@@ -610,7 +617,7 @@ class SheinBotCompras():
 
         try:
             # Esperar a que el popup sea visible
-            popup = WebDriverWait(self.driver, 10).until(
+            popup = WebDriverWait(self.driver, 2).until(
                 EC.visibility_of_element_located((By.XPATH, "//div[@class='cmp_c_1100']//div[contains(text(), 'Aceptar Todo')]"))
             )
 
@@ -666,26 +673,43 @@ class SheinBotCompras():
                 add_cart_button.click()
                 print("Producto clickeado")
                 self.driver.execute_script("window.scrollTo(0, 0)")
-                time.sleep(1)
+                time.sleep(2)
+                if add_cart_button.text.upper().strip() == 'AGOTADO' or add_cart_button.text.upper().strip() == 'SOLD OUT':
+                    print("Producto agotado")
+                    self.gui_callback("Producto agotado", error=True)
+                    return False
                 container_sizes = self.driver.find_element(By.XPATH, '//div[@class="product-intro__size-choose"]') 
-                self.driver.execute_script("arguments[0].scrollIntoView({ behavior: 'smooth', block: 'center' });", container_sizes)
-                image_element = self.driver.find_element(By.CSS_SELECTOR, ".product-intro__thumbs-item img")
-                # Crea una acción para hacer hover
-                actions = ActionChains(self.driver)
-                actions.move_to_element(image_element).perform()
-                # Esperar a que aparezca el banner (que no tenga display: none)
-                try:
-                    WebDriverWait(self.driver, 3).until(
-                        lambda d: d.find_element(By.XPATH, '//div[@class="bsc-mini-cart__overlay"]').is_displayed()
-                    )
-                    print("Banner detectado, esperando a que desaparezca...")
 
-                    WebDriverWait(self.driver, 5).until(
-                        lambda d: not d.find_element(By.XPATH, '//div[@class="bsc-mini-cart__overlay"]').is_displayed()
-                    )
-                    print("Banner desapareció, continuando...")
-                except Exception as e:
-                    print("No se detectó el banner o desapareció antes de lo esperado")
+                if container_sizes.is_displayed() or container_sizes:
+
+                    self.driver.execute_script("arguments[0].scrollIntoView({ behavior: 'smooth', block: 'center' });", container_sizes)
+                    try:
+                        image_element = self.driver.find_element(By.CSS_SELECTOR, ".product-intro__thumbs-item img")
+                    # Crea una acción para hacer hover
+                    except Exception as e:
+                        image_element = None
+                    if image_element:
+                        actions = ActionChains(self.driver)
+                        actions.move_to_element(image_element).perform()
+                        # Esperar a que aparezca el banner (que no tenga display: none)
+                        try:
+                            WebDriverWait(self.driver, 3).until(
+                                lambda d: d.find_element(By.XPATH, '//div[@class="bsc-mini-cart__overlay"]').is_displayed()
+                            )
+                            print("Banner detectado, esperando a que desaparezca...")
+
+                            WebDriverWait(self.driver, 5).until(
+                                lambda d: not d.find_element(By.XPATH, '//div[@class="bsc-mini-cart__overlay"]').is_displayed()
+                            )
+                            print("Banner desapareció, continuando...")
+                        except Exception as e:
+                            print("No se detectó el banner o desapareció antes de lo esperado")
+                else:
+                    print("No se detectó el contenedor de tallas")
+                    self.gui_callback("No se detectó el contenedor de tallas", error=True)
+                    self.gui_callback("verificando si el producto se puede adquirir sin talla", error=False)
+                    time.sleep(1)
+                    add_cart_button.click()
 
             return True
         except Exception as e:
@@ -746,11 +770,11 @@ class SheinBotCompras():
 
 
     def cerrar_modalV2(self):
+        if self.is_close_modalv2:
+            return
+        
         try:
 
-            if self.is_close_modalv2:
-                return
-            #time.sleep(2)
             try:
                 container=self.driver.find_element(By.XPATH, '//div[@class="dialog-header-v2__close-btn svg"]')
             except Exception as e:
@@ -812,10 +836,32 @@ class SheinBotCompras():
     def validate_size(self,size):
 
         try:
-
-            container = self.driver.find_element(By.XPATH, '//div[@class="product-intro__size-choose"]')
-            sizes = container.find_elements(By.XPATH, './/span') 
-            self.driver.execute_script("arguments[0].scrollIntoView({ behavior: 'smooth', block: 'center' });", container)
+            try:
+                container = self.driver.find_element(By.XPATH, '//div[@class="product-intro__size-choose"]')
+                if not container:
+                    self.gui_callback("No se encontró el contenedor de tallas", error=True)
+                    self.gui_callback("Verificando otro tipo de producto(sin talla)", error=False)
+                    return True
+                sizes = container.find_elements(By.XPATH, './/span') 
+                if sizes is None or len(sizes) == 0:
+                    self.gui_callback("No se encontraron tallas", error=True)
+                    return True
+                
+                data_size=sizes[0].text.strip()
+                if not data_size or data_size == "":
+                    self.gui_callback("No se encontraron tallas", error=True)
+                    return True
+            except NoSuchElementException as e:
+                print(f"Error al intentar validar la talla: {e}")
+                return True
+            
+            self.driver.execute_script("""
+                var element = arguments[0];
+                var rect = element.getBoundingClientRect();
+                var absoluteElementTop = rect.top + window.pageYOffset;
+                var middle = absoluteElementTop - (window.innerHeight / 2) + (rect.height / 2);
+                window.scrollTo({ top: middle, behavior: 'smooth' });
+            """, container)
             time.sleep(1)
             for s in sizes:
                 if s.text == size:
@@ -829,6 +875,11 @@ class SheinBotCompras():
         
 
     def close_banner(self):
+
+
+        if self.is_close_banner:
+            return 
+
         try:
             # Verificar si el div con la clase específica está presente
             banners = self.driver.find_elements(By.XPATH, '//div[@class="c-quick-register j-quick-register c-quick-register-hide c-quick-register__pe"] | //div[@class="c-quick-register j-quick-register c-quick-register-hide c-quick-register__uses"]')
@@ -838,7 +889,8 @@ class SheinBotCompras():
             #//div[@class="c-quick-register j-quick-register c-quick-register-hide c-quick-register__uses"]
             if not banners or len(banners) == 0:
                 print("El div del banner no está presente. No hay nada que cerrar.")
-                return True  # No hay banner que cerrar
+                self.is_close_banner=True  # No hay banner que cerrar
+                return True
             
             # Si el div está presente, intentar cerrar el banner
             close_button = WebDriverWait(self.driver,2).until(
@@ -846,10 +898,12 @@ class SheinBotCompras():
             )
             close_button.click()
             print("Banner cerrado exitosamente.")
+            self.is_close_banner=True
             return True
         
         except Exception as e:
             print("No se pudo cerrar el banner:", e)
+            self.is_close_banner=True
             return False
 
 
@@ -859,7 +913,7 @@ class SheinBotCompras():
         self.driver.get("https://us.shein.com/checkout")
         self.gui_callback("Procesando precios en el checkout", error=False)
         self.driver.implicitly_wait(5)
-        
+        fecha_actual = date.today()
         self.html_bs4 = BeautifulSoup(self.driver.page_source, 'html.parser')
 
         try:
@@ -873,25 +927,181 @@ class SheinBotCompras():
                     sanitize_data_script = data_script.replace("\n", "")
                     clean_data_script = sanitize_data_script.strip().strip("'")
                     dict_data = json.loads(clean_data_script)
-                    prices_data = dict_data.get("checkout", {}).get("mall_caculate_info", {}).get("originMallCaculData", {}).get("info", {}).get("cart_sub_infos", [])
-                for p in prices_data:
-                    # Comparar los SKUs del listado con el SKU del producto
-                    for index in range(len(self.sku_data)): 
-                        sku_dict = self.sku_data[index]  # Asegurar que sea un diccionario
-                        sku = sku_dict.get("sku","")  # Obtener el SKU como string
-                        if len(sku) < 18:
+                    id_to_skus = {}
+                    groups = dict_data.get("cartsInfo", {}).get("good_business_group", [])
+                    #print(f"Total de grupos en cartsInfo: {len(groups)}")
+
+                    for i, group in enumerate(groups):
+                        goods_list = group.get("goods", [])
+                        #print(f"Grupo {i}: contiene {len(goods_list)} productos")
+
+                        for item in goods_list:
+                            sku_code = item.get("skuCode")
+                            sku_fallback = item.get("product", {}).get("goods_sn")  # por si acaso
+                            item_id = item.get("id")
+
+                            if item_id:
+                                skus = []
+                                if sku_code:
+                                    skus.append(sku_code)
+                                if sku_fallback:
+                                    skus.append(sku_fallback)
+                                id_to_skus[item_id] = skus
+                            else:
+                                print(f"[ADVERTENCIA] Producto sin ID válido: SKU_CODE={sku_code}, SKU={sku_fallback}, ID={item_id}")
+
+                    #print(f"\nTotal IDs mapeados en id_to_skus: {len(id_to_skus)}")
+                    #print(f"IDs: {list(id_to_skus.keys())}\n")
+
+                    # Paso 2: Buscar ID en cartList según sku_code o sku
+                    cart_list = dict_data.get("checkout", {}).get("cartList", [])
+                    #print(f"Total de items en checkout.cartList: {len(cart_list)}")
+
+                    for index in range(len(self.sku_data)):
+                        sku_dict = self.sku_data[index]
+                        sku_code = sku_dict.get("sku_code", "")
+                        sku_fallback = sku_dict.get("SKU", "")
+                        #print(f"Procesando SKU del cliente: sku_code={sku_code}, sku={sku_fallback}")
+
+                        # Buscar coincidencia en id_to_skus
+                        matching_id = None
+                        for item_id, skus in id_to_skus.items():
+                            if sku_code in skus or sku_fallback in skus:
+                                matching_id = item_id
+                                break
+
+                        if not matching_id:
+                            #print(f"[NO MATCH] SKU '{sku_code}' ni '{sku_fallback}' encontrado en ninguna lista de SKUs")
                             continue
 
-                        sku = sku[:18]
-                        if p.get("skc") == sku:
-                            price = p.get("single_sub_total", {}).get("usdAmount", "0.0")
-                            if price:
-                                self.gui_callback(f"SKU {sku} - Precio: {price}", error=False)
-                            self.sku_data[index]["precio"] = price
+                        #print(f"Match encontrado: ID '{matching_id}' para SKU '{sku_code or sku_fallback}'")
+
+                        # Buscar el precio
+                        encontrado = False
+                        for cart_item in cart_list:
+                            if cart_item.get("cartId") == matching_id:
+                                price = cart_item.get("priceData", {}).get("unitPrice", {}).get("price", {}).get("amount")
+                                if price:
+                                    #print(f"[OK] Precio encontrado para ID {matching_id}: {price}")
+                                    self.gui_callback(f"SKU {sku_code or sku_fallback} - Precio: {price}", error=False)
+                                    self.sku_data[index]["Precio Compra"] = price
+                                    self.sku_data[index]["Fecha Compra"] = fecha_actual
+                                    self.sku_data[index]["Resultado"] = "añadido al carrito"
+                                encontrado = True
+                                break
+                        if not encontrado:
+                            print(f"[NO MATCH] ID '{matching_id}' no encontrado en cartList")
+
+                    # Paso 3: Eliminar campos innecesarios
+                    for sku in self.sku_data:
+                        for field in ["sku_code", "product_id"]:
+                            if field in sku:
+                                del sku[field]
         except Exception as e:
-            print(f"Error: {e}")
+            self.gui_callback(f"Error al procesar precios en el checkout: {e}", error=True)
+            #print(f"Error: {e}")
 
 
 
     def insert_log(self, sku, message):
         self.logger.createLog(sku, message)
+
+            #cuenta_regresiva = 5
+            # for _ in range(5):
+            #     self.gui_callback(f"Ingresando datos de la cuenta en {cuenta_regresiva} segundos", error=False)
+            #     time.sleep(1)
+            #     cuenta_regresiva -= 1
+            # if "login" not in current_url:
+            #     self.is_login = True
+            #     return True
+        # current_url=self.driver.current_url
+        
+        # try:
+        #     WebDriverWait(self.driver, 10).until(
+        #         EC.presence_of_element_located((By.XPATH, '//div[@class="input_filed-wrapper"]'))
+        #     )
+
+
+        #     container_input=self.driver.find_element(By.XPATH,'//div[@class="email-recommend-input"]')
+        #     input_email=container_input.find_element(By.XPATH,'.//input[@class="sui-input__inner sui-input__inner-suffix"]')
+        #     input_email.send_keys(self.account_shein)
+
+        #     click_button_continue=self.driver.find_element(By.XPATH,'//div[@class="actions"]//div[@class="login-point_button"]/button')
+
+        #     click_button_continue.click()
+        #     time.sleep(1)
+        #     container_password=WebDriverWait(self.driver, 10).until(
+        #         EC.presence_of_element_located((By.XPATH, '//div[@class="input_filed-text"]'))
+        #     )
+        #     try:
+
+        #         click_button_continue.click()
+        #     except Exception as e:
+        #         #print(f"Error al clickear el por 2 vez el botón de continuar: {str(e)}")
+        #         return False
+
+        #     try:
+        #         input_password_1 = container_password.find_element(By.XPATH, './/div[@class="sui-input"]//input[@class="sui-input__inner sui-input__inner-suffix"]')
+        #         input_password_1.send_keys(self.password_shein)
+        #     except (ElementNotInteractableException, WebDriverException) as e:
+        #         try:
+        #             # Si no se puede interactuar con el primero, intentamos con el segundo
+        #             input_password_2 = container_password.find_elements(By.XPATH, './/div[@class="sui-input"]//input[@class="sui-input__inner sui-input__inner-suffix"]')[1]
+        #             input_password_2.send_keys(self.password_shein)
+        #         except (ElementNotInteractableException, WebDriverException) as e:
+        #             # Si ambos fallan, lanzamos un error
+        #             raise Exception("No se pudo enviar la contraseña a ninguno de los campos.")
+
+        #     click_button_continue_2=self.driver.find_element(By.XPATH,'//div[@class="actions"]//div[@class="login-point_button"]/button')[1]
+            
+
+        #     click_button_continue_2.click()
+        #     time.sleep(1)
+            
+        #     if current_url == self.driver.current_url:
+        #         print("Error al ingresar datos de la cuenta , no cambió de pagina")
+        #         return False
+
+        #self.guardar_cookies()
+        #self.guardar_session_storage()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        # if not self.set_quantity(current_sku['quantity']):
+        #     print("Error al establecer la cantidad")
+        #     self.not_processed.append(current_sku)
+        #     return
+        
+        
+        # print("Cantidad establecida correctamente")
+        
+        # if self.click_para_checkout_validar_data():
+        #     print("Checkout validado")
+        # else:
+        #     print("Error al validar el checkout")
+        #     self.not_processed.append(current_sku)
+        #     return
+        
+
+        # self.ingresar_datos_cuenta()
+
+        # if self.procesar_pago_and_checkout_price():
+        #     print("Pago procesado y precio de checkout validado")
+        # else:
+        #     print("Error al procesar el pago y el precio del checkout")
+        #     self.not_processed.append(current_sku)
+        #     return

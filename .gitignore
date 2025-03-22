@@ -31,3 +31,5 @@ geckodriver
 # Ignore other common files
 .DS_Store
 Thumbs.db
+Output/BotCompras.exe
+Output/BotCompras.exe

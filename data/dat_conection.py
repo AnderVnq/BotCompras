@@ -6,11 +6,11 @@ load_dotenv()
 
 class DBConfigMySQL:
     def __init__(self):
-        self.DB_HOST = os.getenv("DB_HOST_TEST","comprafacil.pics")
-        self.DB_PORT = os.getenv("DB_PORT_TEST","3306")
-        self.DB_USER = os.getenv("DB_USER_TEST","scraper")
-        self.DB_PASSWORD = os.getenv("DB_PASSWORD_TEST","AppScraper2024!!")
-        self.DB_NAME = os.getenv("DB_NAME_TEST","dev_scp")
+        self.DB_HOST = "38.105.232.116"
+        self.DB_PORT = "3306"
+        self.DB_USER = "super_scraper"
+        self.DB_PASSWORD = "@!2025GPaByPeGH!"
+        self.DB_NAME = "CRSLG_DB"
         self.connection = None
 
     def connect(self):
